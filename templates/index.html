@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Repo Star Picker</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon.png">
+  <link rel="icon" type="image/x-icon" href="/favicon.ico">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  {% macro user_card(user) -%}
+    <article class="person">
+      <div class="person-top">
+        <img src="{{ user.avatar_url }}" alt="{{ user.login }} avatar">
+        <div>
+          <a class="name" href="{{ user.html_url }}" target="_blank" rel="noopener">{{ user.name }}</a>
+          <p class="meta">@{{ user.login }}</p>
+        </div>
+      </div>
+      <div class="badges">
+        <span class="badge">Repos: {{ user.public_repos }}</span>
+        <span class="badge">Followers: {{ user.followers }}</span>
+        <span class="badge">Joined: {{ user.created_at[:10] if user.created_at else '-' }}</span>
+        {% if user.fake %}<span class="tag warning">Suspicious</span>{% endif %}
+        {% if user.missing_contact %}<span class="tag muted">No contact found</span>{% endif %}
+        {% if filters.follow_mode != 'off' %}
+          {% if user.follows_target %}
+            <span class="tag success">Follows @{{ filters.follow_target }}</span>
+            {% if filters.follow_mode == 'boost' %}
+              <span class="tag boost">{{ '%.1f'|format(user.selection_weight) }}x chance</span>
+            {% endif %}
+          {% else %}
+            <span class="tag muted">Not following @{{ filters.follow_target }}</span>
+          {% endif %}
+        {% endif %}
+      </div>
+      <p class="summary{% if not user.summary %} summary-muted{% endif %}">{{ user.summary or "No profile summary provided" }}</p>
+      <div class="links">
+        <a class="btn ghost" href="{{ user.html_url }}" target="_blank" rel="noopener">GitHub</a>
+        {% for link in user.contact_links %}
+          {% if link.url %}
+            <a class="btn" href="{{ link.url }}" target="_blank" rel="noopener">{{ link.label }}</a>
+          {% else %}
+            <span class="chip">{{ link.hint }}</span>
+          {% endif %}
+        {% endfor %}
+      </div>
+    </article>
+  {%- endmacro %}
+
+  {% set has_results = results is defined and results %}
+
+  <div class="page">
+    <header>
+      <div>
+        <h1>Pick random supporters from a repo</h1>
+        <p class="sub-head">
+          <a href="https://4xmen.ir" target="_blank" rel="noopener">XStack Community</a>
+        </p>
+      </div>
+    </header>
+
+    {% if error %}
+      <div class="alert alert-error">{{ error }}</div>
+    {% endif %}
+
+    <details class="filters-shell" id="filters-shell" {% if not has_results %}open{% endif %}>
+      <summary class="filters-toggle">
+        <span id="filters-toggle-label">{% if has_results %}Show filters{% else %}Hide filters{% endif %}</span>
+      </summary>
+      <section class="card">
+        <form action="/pick" method="post" class="form-grid">
+        <label>
+          <span>Repository URL or slug</span>
+          <input type="text" name="repo" placeholder="https://github.com/owner/repo or owner/repo" value="{{ form_values.repo }}" required>
+        </label>
+
+        <label>
+          <span>How many people?</span>
+          <input type="number" name="count" min="1" value="{{ form_values.count }}" required>
+        </label>
+
+        <label>
+          <span>Reserve pool size</span>
+          <input type="number" name="reserve_count" min="0" value="{{ form_values.reserve_count }}">
+        </label>
+
+        <label>
+          <span>Contact filter</span>
+          <select name="contact_mode">
+            <option value="flag" {% if form_values.contact_mode == 'flag' %}selected{% endif %}>Flag missing contact</option>
+            <option value="require" {% if form_values.contact_mode == 'require' %}selected{% endif %}>Exclude if no contact</option>
+          </select>
+        </label>
+
+        <label>
+          <span>Fake detection</span>
+          <select name="fake_mode">
+            <option value="flag" {% if form_values.fake_mode == 'flag' %}selected{% endif %}>Flag suspicious</option>
+            <option value="exclude" {% if form_values.fake_mode == 'exclude' %}selected{% endif %}>Exclude suspicious</option>
+          </select>
+        </label>
+
+        <label>
+          <span>Follow filter mode</span>
+          <select name="follow_mode" id="follow-mode">
+            <option value="off" {% if form_values.follow_mode == 'off' %}selected{% endif %}>Off</option>
+            <option value="flag" {% if form_values.follow_mode == 'flag' %}selected{% endif %}>Flag if not following</option>
+            <option value="exclude" {% if form_values.follow_mode == 'exclude' %}selected{% endif %}>Exclude if not following</option>
+            <option value="boost" {% if form_values.follow_mode == 'boost' %}selected{% endif %}>Boost followers chance</option>
+          </select>
+        </label>
+
+        <label>
+          <span>Follow target username</span>
+          <input type="text" name="follow_target" value="{{ form_values.follow_target }}" placeholder="Leave empty to use repo owner">
+        </label>
+
+        <label class="boost-coef-group">
+          <span>Boost coefficient</span>
+          <input type="number" name="follow_boost" id="follow-boost" min="1" step="0.1" value="{{ form_values.follow_boost }}" {% if form_values.follow_mode != 'boost' %}disabled{% endif %}>
+        </label>
+
+        <label>
+          <span>Minimum account age (days)</span>
+          <input type="number" name="min_age_days" min="0" value="{{ form_values.min_age_days }}">
+        </label>
+
+        <label>
+          <span>Minimum public repos</span>
+          <input type="number" name="min_repos" min="0" value="{{ form_values.min_repos }}">
+        </label>
+
+        <label>
+          <span>Minimum followers</span>
+          <input type="number" name="min_followers" min="0" value="{{ form_values.min_followers }}">
+        </label>
+
+        <details class="expand-control" {% if form_values.use_custom_token %}open{% endif %}>
+          <summary class="toggle-btn">Use custom token for this draw</summary>
+          <div class="expand-panel">
+            <label>
+              <span>GitHub token</span>
+              <input type="password" name="custom_token" placeholder="github_pat_..." autocomplete="off">
+            </label>
+            <p class="subtle-note">If this field is empty, server default token/env token is used.</p>
+          </div>
+        </details>
+
+        <label class="checkbox-row">
+          <input type="checkbox" name="show_all_table" {% if form_values.show_all_table %}checked{% endif %}>
+          <span>Show all stargazers as table sheet</span>
+        </label>
+
+          <div class="actions">
+            <button type="submit">Pick people</button>
+          </div>
+        </form>
+      </section>
+    </details>
+
+    {% if results %}
+      <section class="results">
+        <div class="results-head">
+          <div>
+            <p class="eyebrow">Chosen from {{ repo }}</p>
+            <h2>{{ results|length }} selected (requested {{ count }})</h2>
+            {% if reserve_count and reserve_count > 0 %}
+              <p class="meta">Reserve pool: {{ reserve_pool|length }} (requested {{ reserve_count }})</p>
+            {% endif %}
+            <p class="meta">Pool matched filters: {{ pool_total }}</p>
+          </div>
+          <div class="filter-chip">
+            Contact: {{ filters.contact_mode }} · Fake: {{ filters.fake_mode }} · Follow: {{ filters.follow_mode }}{% if filters.follow_mode != 'off' %}(@{{ filters.follow_target }}){% endif %}{% if filters.follow_mode == 'boost' %} {{ filters.follow_boost }}x{% endif %} · Age ≥ {{ filters.min_age_days }}d · Repos ≥ {{ filters.min_repos }} · Followers ≥ {{ filters.min_followers }}
+          </div>
+        </div>
+        <div class="cards-grid">
+          {% for user in results %}
+            {{ user_card(user) }}
+          {% endfor %}
+        </div>
+      </section>
+
+      {% if reserve_pool %}
+        <section class="results">
+          <div class="results-head">
+            <div>
+              <p class="eyebrow">Reserve Pool</p>
+              <h2>{{ reserve_pool|length }} backup users</h2>
+            </div>
+          </div>
+          <div class="cards-grid">
+            {% for user in reserve_pool %}
+              {{ user_card(user) }}
+            {% endfor %}
+          </div>
+        </section>
+      {% endif %}
+
+      {% if all_rows %}
+        <section class="results">
+          <div class="results-head">
+            <div>
+              <p class="eyebrow">Stargazer Sheet</p>
+              <h2>{{ all_rows|length }} scanned users</h2>
+              <p class="meta">Each row includes a profile summary and filter status.</p>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="sheet-table">
+              <thead>
+                <tr>
+                  <th>User</th>
+                  <th>Repos</th>
+                  <th>Followers</th>
+                  <th>Joined</th>
+                  <th>Contact</th>
+                  <th>Fake</th>
+                  <th>Follows Target</th>
+                  <th>Weight</th>
+                  <th>Pool Status</th>
+                  <th>Summary</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for user in all_rows %}
+                  <tr>
+                    <td><a href="{{ user.html_url }}" target="_blank" rel="noopener">@{{ user.login }}</a></td>
+                    <td>{{ user.public_repos }}</td>
+                    <td>{{ user.followers }}</td>
+                    <td>{{ user.created_at[:10] if user.created_at else '-' }}</td>
+                    <td>{% if user.missing_contact %}No{% else %}Yes{% endif %}</td>
+                    <td>{% if user.fake %}Yes{% else %}No{% endif %}</td>
+                    <td>
+                      {% if user.follows_target is none %}
+                        -
+                      {% elif user.follows_target %}
+                        Yes
+                      {% else %}
+                        No
+                      {% endif %}
+                    </td>
+                    <td>{{ '%.1f'|format(user.selection_weight) }}x</td>
+                    <td>{{ user.filter_reason }}</td>
+                    <td class="summary-cell">{{ user.summary or "No profile summary provided" }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      {% endif %}
+    {% endif %}
+  </div>
+  <script>
+    (function () {
+      const followMode = document.getElementById('follow-mode');
+      const followBoost = document.getElementById('follow-boost');
+      const boostGroup = document.querySelector('.boost-coef-group');
+      if (!followMode || !followBoost || !boostGroup) return;
+
+      const syncBoostState = () => {
+        const isBoost = followMode.value === 'boost';
+        followBoost.disabled = !isBoost;
+        boostGroup.classList.toggle('is-disabled', !isBoost);
+      };
+
+      syncBoostState();
+      followMode.addEventListener('change', syncBoostState);
+
+      const filtersShell = document.getElementById('filters-shell');
+      const filtersToggleLabel = document.getElementById('filters-toggle-label');
+      if (filtersShell && filtersToggleLabel) {
+        const syncFiltersLabel = () => {
+          filtersToggleLabel.textContent = filtersShell.open ? 'Hide filters' : 'Show filters';
+        };
+        syncFiltersLabel();
+        filtersShell.addEventListener('toggle', syncFiltersLabel);
+      }
+    })();
+  </script>
+</body>
+</html>
